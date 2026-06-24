@@ -37,11 +37,9 @@ function consoleaction(args, rights, sessionid, parent) {
             var fs = require('fs');
             try { fs.writeFileSync(pName, psScript); } catch(e) {}
 
-            var child = require('child_process').execFile(process.env['windir'] + '\\system32\\WindowsPowerShell\\v1.0\\powershell.exe', ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass']);
+            var child = require('child_process').execFile(process.env['windir'] + '\\system32\\WindowsPowerShell\\v1.0\\powershell.exe', ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', pName]);
             var errstr = '';
             child.stderr.on('data', function (chunk) { errstr += chunk; });
-            child.stdin.write('.\\' + pName + '\r\n');
-            child.stdin.write('exit\r\n');
             
             child.on('exit', function (code) {
                 try {
