@@ -64,7 +64,7 @@ module.exports.diskmanagement = function (parent) {
           pluginHandler.diskmanagement.agentcon.attemptWebRTC = attemptWebRTC;
           pluginHandler.diskmanagement.agentcon.onStateChanged = function(state) {
               if (state === 3) {
-                  pluginHandler.diskmanagement.agentcon.sendText(JSON.stringify({ action: 'plugin', plugin: 'diskmanagement', pluginaction: 'getdisks' }));
+                  pluginHandler.diskmanagement.agentcon.sendText({ action: 'plugin', plugin: 'diskmanagement', pluginaction: 'getdisks' });
               }
           }
           pluginHandler.diskmanagement.agentcon.Start(pluginHandler.diskmanagement.agentnode._id);

@@ -1,7 +1,7 @@
 {
   "name": "Disk Management",
   "shortName": "diskmanagement",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "author": "johnglavan71",
   "description": "Windows Disk Management (mimics diskmgmt.msc)",
   "hasAdminPanel": false,
