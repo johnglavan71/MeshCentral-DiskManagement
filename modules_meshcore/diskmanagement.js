@@ -25,25 +25,26 @@ function consoleaction(args, rights, sessionid, parent) {
     
     switch (fnname) {
         case 'getdisks': {
-            var fileRand = Math.random().toString(32).replace('0.', '');
-            var pName = 'dmscript' + fileRand + '.ps1';
-            var oName = 'dmout' + fileRand + '.txt';
-            
             var psScript = "$disks = Get-Disk | Select-Object Number, PartitionStyle, TotalSize, OperationalStatus; " +
                            "$partitions = Get-Partition | Select-Object DiskNumber, PartitionNumber, DriveLetter, Type, Size; " +
                            "$volumes = Get-Volume | Select-Object DriveLetter, FileSystemLabel, FileSystem, HealthStatus, Size, SizeRemaining; " +
-                           "@{ disks = @($disks); partitions = @($partitions); volumes = @($volumes) } | ConvertTo-Json -Depth 4 -Compress | Out-File " + oName + " -Encoding UTF8";
+                           "@{ disks = @($disks); partitions = @($partitions); volumes = @($volumes) } | ConvertTo-Json -Depth 4 -Compress";
             
-            var fs = require('fs');
-            try { fs.writeFileSync(pName, psScript); } catch(e) {}
-
-            var child = require('child_process').execFile(process.env['windir'] + '\\system32\\WindowsPowerShell\\v1.0\\powershell.exe', ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', pName]);
+            var child = require('child_process').execFile(
+                process.env['windir'] + '\\system32\\WindowsPowerShell\\v1.0\\powershell.exe',
+                ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
+                { cwd: process.env['TEMP'] }
+            );
+            
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            
             var errstr = '';
-            child.stderr.on('data', function (chunk) { errstr += chunk; });
+            child.stderr.on('data', function (chunk) { errstr += chunk.toString(); });
             
             child.on('exit', function (code) {
                 try {
-                    var out = fs.readFileSync(oName, 'utf8').toString();
+                    var out = child.stdout.str;
                     if (out.charCodeAt(0) === 0xFEFF) out = out.substring(1);
                     if (out) {
                         try { out = out.trim(); } catch (e) { }
@@ -58,13 +59,10 @@ function consoleaction(args, rights, sessionid, parent) {
                             wscon.write(Buffer.from(JSON.stringify({type: 'error', message: 'No disk data returned by PowerShell. Stderr: ' + errstr})));
                         }
                     }
-                    try { fs.unlinkSync(oName); } catch (e) {}
-                    try { fs.unlinkSync(pName); } catch (e) {}
                 } catch (e) {
                     if (isWsconnection) {
                         wscon.write(Buffer.from(JSON.stringify({type: 'error', message: e.toString() + ' Stderr: ' + errstr})));
                     }
-                    try { fs.unlinkSync(pName); } catch (e) {}
                 }
             });
             break;
