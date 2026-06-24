@@ -8,76 +8,111 @@ module.exports.diskmanagement = function (parent) {
     obj.exports = [
       'registerPluginTab',
       'on_device_page',
-      'fe_on_message',
       'onDeviceRefreshEnd',
-      'createRemoteDiskManagement',
       'renderDisks',
-      'formatBytes'
+      'formatBytes',
+      'loadDisksData'
     ];
 
     obj.registerPluginTab = function() {
+      if (typeof currentNode === 'undefined' || currentNode == null) return { tabId: null, tabTitle: null };
       if (currentNode.osdesc.toLowerCase().indexOf('windows') === -1) return { tabId: null, tabTitle: null };
-      return { tabTitle: "Disk Management", tabId: "pluginDiskManagement" };
+      return { tabId: 'pluginDiskManagement', tabTitle: 'Disk Management' };
     };
 
     obj.on_device_page = function() {
-      return '<div id=pluginDiskManagement></div>';
+        return '<div id=pluginDiskManagement></div>';
     };
 
-    obj.fe_on_message = function(server, message) {
+    obj.loadDisksData = function(server, message) {
         try {
-            var data = JSON.parse(message);
-            if (data.type === 'disks') {
+            var data = (typeof message === 'string') ? JSON.parse(message) : message;
+            if (data.error) {
+                QH('pluginDiskManagement', '<div style="padding: 10px; color: red;">Error: ' + data.error + '</div>');
+            } else {
                 pluginHandler.diskmanagement.renderDisks(data.data);
-            } else if (data.type === 'close') {
-                if (pluginHandler.diskmanagement.agentcon) {
-                    pluginHandler.diskmanagement.agentcon.Stop();
-                    pluginHandler.diskmanagement.agentcon = null;
-                }
-            } else if (data.type === 'error') {
-                QH('pluginDiskManagement', '<div style="padding: 10px; color: red;">Error fetching disk info: ' + data.message + '</div>');
             }
-        } catch (e) {
-            console.log("DiskManagement JSON Parse Error: ", e);
+        } catch(e) {
+            QH('pluginDiskManagement', '<div style="padding: 10px; color: red;">Frontend Error: ' + e.toString() + '</div>');
         }
     };
 
-    obj.createRemoteDiskManagement = function(onDiskUpdate) {
-        var myobj = { protocol: 7 }; 
-        myobj.onDiskUpdate = onDiskUpdate;
-        myobj.xxStateChange = function(state) { }
-        myobj.ProcessData = function(data) { onDiskUpdate(null, data); }
-        return myobj;
-    }
-
     obj.onDeviceRefreshEnd = function(nodeid, panel, refresh, event) {
+      if (typeof currentNode === 'undefined' || currentNode == null) return;
+      if (currentNode.osdesc.toLowerCase().indexOf('windows') === -1) return;
+      
       pluginHandler.registerPluginTab(pluginHandler.diskmanagement.registerPluginTab());
-      
-      if (typeof pluginHandler.diskmanagement.agentcon == 'undefined') { pluginHandler.diskmanagement.agentcon = null; }
-      if (pluginHandler.diskmanagement.agentcon != null) { pluginHandler.diskmanagement.agentcon.Stop(); pluginHandler.diskmanagement.agentcon = null; }
-      
       try { QH('pluginDiskManagement', '<div style="padding: 10px;">Loading disk information...</div>'); } catch(e) { } 
       
-      pluginHandler.diskmanagement.agentnode = currentNode;
-      if (pluginHandler.diskmanagement.agentnode.conn && currentNode.osdesc.toLowerCase().indexOf('windows') !== -1) {
-          pluginHandler.diskmanagement.agentcon = CreateAgentRedirect(meshserver, pluginHandler.diskmanagement.createRemoteDiskManagement(pluginHandler.diskmanagement.fe_on_message), serverPublicNamePort, authCookie, authRelayCookie, domainUrl);
-          pluginHandler.diskmanagement.agentcon.attemptWebRTC = attemptWebRTC;
-          pluginHandler.diskmanagement.agentcon.onStateChanged = function(state) {
-              if (state === 3) {
-                  pluginHandler.diskmanagement.agentcon.sendText({ action: 'plugin', plugin: 'diskmanagement', pluginaction: 'getdisks' });
-              }
-          }
-          pluginHandler.diskmanagement.agentcon.Start(pluginHandler.diskmanagement.agentnode._id);
+      if (currentNode && currentNode.conn) {
+          meshserver.send({ 
+              action: 'plugin', 
+              plugin: 'diskmanagement', 
+              pluginaction: 'getdisks',
+              nodeid: currentNode._id 
+          });
       }
     };
 
     obj.serveraction = function(command, myparent, grandparent) {
-        // Not used for direct front-end to agent communication
+        if (command.plugin !== 'diskmanagement') return;
+        
+        var fs = require('fs');
+        try { fs.appendFileSync(obj.parent.parent.datapath + '/dm_server_log.txt', 'SERVERACTION: received ' + command.pluginaction + ' for node: ' + command.nodeid + '\n'); } catch(e) {}
+        
+        var sessionid = null;
+        try { sessionid = myparent.ws.sessionId; } catch (e) {}
+
+        switch(command.pluginaction) {
+            case 'getdisks':
+                try {
+                    if (obj.meshServer.webserver.wsagents[command.nodeid]) {
+                        try { fs.appendFileSync(obj.parent.parent.datapath + '/dm_server_log.txt', 'SERVERACTION: agent found, sending command.\n'); } catch(e) {}
+                        obj.meshServer.webserver.wsagents[command.nodeid].send(JSON.stringify({
+                            action: 'plugin',
+                            plugin: 'diskmanagement',
+                            pluginaction: 'getdisks',
+                            sessionid: sessionid
+                        }));
+                    } else {
+                        try { fs.appendFileSync(obj.parent.parent.datapath + '/dm_server_log.txt', 'SERVERACTION: AGENT NOT FOUND IN wsagents!\n'); } catch(e) {}
+                    }
+                } catch(e) {
+                    try { fs.appendFileSync(obj.parent.parent.datapath + '/dm_server_log.txt', 'SERVERACTION: Exception: ' + e + '\n'); } catch(err) {}
+                }
+                break;
+            case 'getdisksResult':
+                try { fs.appendFileSync(obj.parent.parent.datapath + '/dm_server_log.txt', 'SERVERACTION: got Result from agent!\n'); } catch(e) {}
+                var targetSessionid = command.sessionid;
+                var response = {
+                    action: 'plugin',
+                    plugin: 'diskmanagement',
+                    method: 'loadDisksData',
+                    data: command.data,
+                    error: command.error,
+                    nodeid: command.nodeid
+                };
+                if (targetSessionid && obj.meshServer.webserver.wssessions2 && obj.meshServer.webserver.wssessions2[targetSessionid]) {
+                    try {
+                        obj.meshServer.webserver.wssessions2[targetSessionid].send(JSON.stringify(response));
+                        try { fs.appendFileSync(obj.parent.parent.datapath + '/dm_server_log.txt', 'SERVERACTION: sent Result to browser session ' + targetSessionid + '!\n'); } catch(e) {}
+                    } catch (e) {
+                        try { fs.appendFileSync(obj.parent.parent.datapath + '/dm_server_log.txt', 'SERVERACTION: failed to send Result to browser!\n'); } catch(e) {}
+                    }
+                } else {
+                    try { fs.appendFileSync(obj.parent.parent.datapath + '/dm_server_log.txt', 'SERVERACTION: browser session not found!\n'); } catch(e) {}
+                }
+                break;
+        }
     };
 
     obj.renderDisks = function(data) {
+        if (!data || (!data.disks && !data.volumes)) {
+            QH('pluginDiskManagement', '<div style="padding: 10px; color: red;">Error: Invalid data received from endpoint.</div>');
+            return;
+        }
         var html = '<style>';
-        html += '#pluginDiskManagement { padding: 10px; font-family: "Trebuchet MS", Arial, Helvetica, sans-serif; }';
+        html += '#pluginDiskManagement { padding: 10px; font-family: "Trebuchet MS", Arial, Helvetica, sans-serif; height: calc(100vh - 250px); overflow-y: auto; box-sizing: border-box; }';
         html += '.dm-table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }';
         html += '.dm-table th, .dm-table td { border: 1px solid rgba(127,127,127,0.3); padding: 8px; text-align: left; }';
         html += '.dm-table th { background-color: rgba(127,127,127,0.1); }';
@@ -140,7 +175,6 @@ module.exports.diskmanagement = function (parent) {
                                     }
                                 }
                             }
-                            // Calculate flex grow based on size relative to total
                             var flexGrow = disk.TotalSize > 0 ? (part.Size / disk.TotalSize) : 1;
                             
                             html += '<div class="dm-part" style="flex-grow: '+flexGrow+';">';
@@ -152,9 +186,9 @@ module.exports.diskmanagement = function (parent) {
                         }
                     }
                 }
-                html += '</div>'; // dm-disk-parts
+                html += '</div>';
                 
-                html += '</div>'; // dm-disk-container
+                html += '</div>';
             }
         }
         
